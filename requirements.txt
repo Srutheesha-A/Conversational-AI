@@ -1,0 +1,11 @@
+streamlit
+langchain
+langchain-community
+langchain-huggingface
+SQLAlchemy
+pandas
+slack-bolt
+python-dotenv
+langchain-google-genai
+langgraph
+matplotlib
