@@ -6,12 +6,9 @@ from datetime import date
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from token_tracker import estimate_tokens, get_tokens_used, add_tokens, is_over_limit
 # ── Environment ──────────────────────────────────────────────────────────────
 load_dotenv()
 
-# Daily token limit per user (configurable via .env)
-DAILY_TOKEN_LIMIT = int(os.environ.get("DAILY_TOKEN_LIMIT", "50000"))
 
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN")
@@ -87,16 +84,6 @@ def run_query(query: str, user_id: str, say, channel_id: str = None) -> None:
         say("Hi there! Ask me anything about the database. 😊")
         return
 
-    # ── Daily token limit check ───────────────────────────────────────────────
-    if is_over_limit(user_id, DAILY_TOKEN_LIMIT):
-        used = get_tokens_used(user_id)
-        say(
-            f"⛔ You've reached your daily token limit "
-            f"(*{used:,}* / *{DAILY_TOKEN_LIMIT:,}* tokens used today). "
-            f"Your quota resets tomorrow. 🔄"
-        )
-        print(f"[token_limit] User {user_id} blocked — {used}/{DAILY_TOKEN_LIMIT} tokens used today.")
-        return
 
     say(f"🔍 Processing: _{query}_")
 
@@ -194,17 +181,6 @@ def run_query(query: str, user_id: str, say, channel_id: str = None) -> None:
             followups_text = "\n".join([f"• _{q}_" for q in final_followups])
             say(f"*Suggested Follow-ups:*\n{followups_text}")
 
-        # ── Record token usage ────────────────────────────────────────────────
-        tokens_in = estimate_tokens(query)
-        tokens_out = estimate_tokens(str(final_result) if final_result else "")
-        total_tokens = tokens_in + tokens_out
-        add_tokens(user_id, total_tokens)
-        used_now = get_tokens_used(user_id)
-        remaining = max(0, DAILY_TOKEN_LIMIT - used_now)
-        print(
-            f"[token_tracker] User {user_id}: +{total_tokens} tokens this query "
-            f"({used_now}/{DAILY_TOKEN_LIMIT} used today, {remaining} remaining)."
-        )
 
         end_time = time.perf_counter()
         print(f"\n[INFO] Total time for query '{query}': {end_time - start_time:.2f} seconds")
