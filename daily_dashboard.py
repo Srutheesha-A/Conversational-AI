@@ -95,6 +95,43 @@ def _fetch_supply_chain_kpis() -> Optional[dict]:
         conn.close()
 
 
+def _fetch_pact_kpis() -> Optional[dict]:
+    """Return PACT KPIs or None if the table doesn't exist."""
+    conn = _get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(DISTINCT PART_NUMBER) FROM supply_chain_data")
+        total_parts = cur.fetchone()[0]
+        cur.execute("SELECT SUM(CAST(PART_BO_QUANTITY AS REAL)) FROM supply_chain_data")
+        total_bo = cur.fetchone()[0] or 0
+        cur.execute("SELECT SUM(CAST(PART_SPAC_QUANTITY AS REAL)) FROM supply_chain_data")
+        total_spac = cur.fetchone()[0] or 0
+        cur.execute("SELECT SUM(CAST(PART_PAST_DUE_ORDERS_QUANTITY AS REAL)) FROM supply_chain_data")
+        total_past_due = cur.fetchone()[0] or 0
+        cur.execute("SELECT SUM(CAST(PART_LEAD_TIME AS REAL)), SUM(CAST(PART_DELAY_DAYS AS REAL)) FROM supply_chain_data")
+        total_lead, total_delay = cur.fetchone()
+        total_lead = total_lead or 0
+        total_delay = total_delay or 0
+        total_time = total_lead + total_delay
+        lead_time_pct = (total_lead / total_time * 100) if total_time > 0 else 0
+        delay_time_pct = (total_delay / total_time * 100) if total_time > 0 else 0
+        cur.execute("SELECT COUNT(DISTINCT PART_SUPPLIER_NAME_ID) FROM supply_chain_data")
+        total_suppliers = cur.fetchone()[0]
+        return {
+            "total_parts": total_parts,
+            "total_bo": total_bo,
+            "total_spac": total_spac,
+            "total_past_due": total_past_due,
+            "lead_time_pct": lead_time_pct,
+            "delay_time_pct": delay_time_pct,
+            "total_suppliers": total_suppliers,
+        }
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 # ── Block Kit Builder ─────────────────────────────────────────────────────────
 
 def build_dashboard_blocks() -> list[dict]:
@@ -179,6 +216,27 @@ def build_dashboard_blocks() -> list[dict]:
                 {"type": "mrkdwn", "text": f"✅ *Delivered*\n{sc['delivered']:,} ({on_time_pct:.1f}%)"},
                 {"type": "mrkdwn", "text": f"⚠️ *Delayed*\n{sc['delayed']:,} ({delayed_pct:.1f}%)"},
                 {"type": "mrkdwn", "text": f"💸 *Shipping Cost*\n₦{sc['total_cost']:,.2f}"},
+            ]
+        })
+        blocks.append({"type": "divider"})
+
+    # ── PACT KPIs ─────────────────────────────────────────────────────────────
+    pact = _fetch_pact_kpis()
+    if pact:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*⚙️  PACT KPIs*"}
+        })
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"🔩 *Total Parts*\n{pact['total_parts']:,}"},
+                {"type": "mrkdwn", "text": f"📉 *Backorders (BO)*\n{pact['total_bo']:,.0f}"},
+                {"type": "mrkdwn", "text": f"📦 *SPAC Quantity*\n{pact['total_spac']:,.0f}"},
+                {"type": "mrkdwn", "text": f"⚠️ *Past Due Orders*\n{pact['total_past_due']:,.0f}"},
+                {"type": "mrkdwn", "text": f"⏳ *Lead Time %*\n{pact['lead_time_pct']:.1f}%"},
+                {"type": "mrkdwn", "text": f"⏱️ *Delay Time %*\n{pact['delay_time_pct']:.1f}%"},
+                {"type": "mrkdwn", "text": f"🏢 *Total Suppliers*\n{pact['total_suppliers']:,}"},
             ]
         })
         blocks.append({"type": "divider"})
