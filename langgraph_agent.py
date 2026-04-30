@@ -370,16 +370,16 @@ Below is CSV data extracted from a query result:
 {csv_text}
 
 Your task:
-1. Decide the BEST chart type to visualise this data: choose one of ["bar", "line", "pie"].
-2. Extract the labels (first column values, excluding the header row) and numeric values (last numeric column, excluding the header row).
-3. Produce a short, descriptive chart title.
+1. Examine the columns. Identify the main label column (usually the first column) and any numeric columns.
+2. For EACH numeric column that makes sense to visualize, define a chart.
+3. Choose the BEST chart type ("bar", "line", or "pie") for each.
+4. Extract the labels and the specific numeric values for that chart.
 
-Return ONLY a valid JSON object with no extra text, in exactly this format:
-Example: {{"chart_type": "...", "title": "...", "x_label": "...", "y_label": "...", "labels": [...], "values": [...]}}
-
-Rules:
-- "values" must be a list of numbers (floats or ints).
-- Do NOT include markdown or code fences.
+Return ONLY a valid JSON list of objects (up to 3 charts). No extra text or markdown fences.
+Example:
+[
+  {{"chart_type": "bar", "title": "Sales by Region", "x_label": "Region", "y_label": "Sales", "labels": ["A", "B"], "values": [10, 20]}}
+]
 """
 
     try:
@@ -388,74 +388,83 @@ Rules:
         raw = response.content.strip()
 
         # Strip any accidental code fences
-        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"```$", "", raw).strip()
 
-        chart_data = json.loads(raw)
+        charts_data = json.loads(raw)
+        if not isinstance(charts_data, list):
+            charts_data = [charts_data]
     except Exception as chart_llm_err:
         print(f"[generate_chart_node] Chart LLM call failed ({chart_llm_err}); skipping chart but CSV will still be uploaded.")
         return {"chart_paths": [], "csv_content": csv_text}
 
-    chart_type = chart_data.get("chart_type")
-    labels = chart_data.get("labels", [])
-    values = chart_data.get("values", [])
-    title = chart_data.get("title", "Chart")
-    x_label = chart_data.get("x_label", "")
-    y_label = chart_data.get("y_label", "")
-
-    if not labels or not values or len(labels) != len(values):
-        print(f"[generate_chart_node] Skipping chart: Invalid labels or values. labels len: {len(labels)}, values len: {len(values)}")
-        return {"chart_paths": [], "csv_content": csv_text}
-
-    # Limit to top 10 values
-    labels = labels[:10]
-    values = values[:10]
-
-    try:
-        values = [float(v) for v in values]
-    except (ValueError, TypeError) as e:
-        print(f"[generate_chart_node] Skipping chart: Error converting values to float. {e}")
-        return {"chart_paths": [], "csv_content": csv_text}
-
+    chart_paths = []
     charts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
     os.makedirs(charts_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    chart_filename = f"chart_{timestamp}.png"
-    chart_path = os.path.join(charts_dir, chart_filename)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, chart_data in enumerate(charts_data[:3]): # generate max 3 charts
+        if not isinstance(chart_data, dict):
+            continue
 
-    if chart_type == "pie":
-        ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=140)
-        ax.set_title(title, fontsize=14, fontweight="bold")
-    elif chart_type == "line":
-        ax.plot(labels, values, marker="o", linewidth=2, color="steelblue")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.tick_params(axis="x", rotation=45)
-        ax.grid(axis="y", linestyle="--", alpha=0.7)
-    else:  # default: bar
-        bars = ax.bar(labels, values, color="steelblue", edgecolor="white")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.tick_params(axis="x", rotation=45)
-        ax.grid(axis="y", linestyle="--", alpha=0.7)
-        for bar, val in zip(bars, values):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height(),
-                f"{val:,.0f}",
-                ha="center", va="bottom", fontsize=9
-            )
+        chart_type = chart_data.get("chart_type")
+        labels = chart_data.get("labels", [])
+        values = chart_data.get("values", [])
+        title = chart_data.get("title", f"Chart {i+1}")
+        x_label = chart_data.get("x_label", "")
+        y_label = chart_data.get("y_label", "")
 
-    plt.tight_layout()
-    plt.savefig(chart_path, dpi=150)
-    plt.close(fig)
+        if not labels or not values or len(labels) != len(values):
+            print(f"[generate_chart_node] Skipping chart {i+1}: Invalid labels or values. labels len: {len(labels)}, values len: {len(values)}")
+            continue
 
-    return {"final_answer": str(final_answer), "chart_paths": [chart_path], "csv_content": csv_text}
+        # Limit to top 10 values
+        labels = labels[:10]
+        values = values[:10]
+
+        try:
+            values = [float(v) for v in values]
+        except (ValueError, TypeError) as e:
+            print(f"[generate_chart_node] Skipping chart {i+1}: Error converting values to float. {e}")
+            continue
+
+        chart_filename = f"chart_{timestamp}_{i}.png"
+        chart_path = os.path.join(charts_dir, chart_filename)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if chart_type == "pie":
+            ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=140)
+            ax.set_title(title, fontsize=14, fontweight="bold")
+        elif chart_type == "line":
+            ax.plot(labels, values, marker="o", linewidth=2, color="steelblue")
+            ax.set_xlabel(x_label)
+            ax.set_ylabel(y_label)
+            ax.set_title(title, fontsize=14, fontweight="bold")
+            ax.tick_params(axis="x", rotation=45)
+            ax.grid(axis="y", linestyle="--", alpha=0.7)
+        else:  # default: bar
+            bars = ax.bar(labels, values, color="steelblue", edgecolor="white")
+            ax.set_xlabel(x_label)
+            ax.set_ylabel(y_label)
+            ax.set_title(title, fontsize=14, fontweight="bold")
+            ax.tick_params(axis="x", rotation=45)
+            ax.grid(axis="y", linestyle="--", alpha=0.7)
+            for bar, val in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height(),
+                    f"{val:,.0f}",
+                    ha="center", va="bottom", fontsize=9
+                )
+
+        plt.tight_layout()
+        plt.savefig(chart_path, dpi=150)
+        plt.close(fig)
+        chart_paths.append(chart_path)
+
+    return {"final_answer": str(final_answer), "chart_paths": chart_paths, "csv_content": csv_text}
 
 def generate_followup_node(state: AgentState):
     query = state.get("query", "")

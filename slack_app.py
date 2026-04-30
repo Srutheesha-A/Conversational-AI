@@ -161,25 +161,27 @@ def run_query(query: str, user_id: str, say, channel_id: str = None) -> None:
 
         # Send follow-up questions before the chart
         if final_followups:
-            import time
             time.sleep(1.5)  # Add delay so CSV displays first
             followups_text = "\n".join([f"• _{q}_" for q in final_followups])
             say(f"*Suggested Follow-ups:*\n{followups_text}")
 
-        # If a chart was generated, upload it to Slack as an inline image
+        # If charts were generated, upload them to Slack as inline images
         if chart_paths:
-            for chart_path in chart_paths:
+            for idx, chart_path in enumerate(chart_paths):
                 try:
                     import os as _os
                     chart_filename = _os.path.basename(chart_path)
                     with open(chart_path, "rb") as f:
                         chart_bytes = f.read()
+                        
+                    comment = "Here is a chart for your query:" if idx == 0 else "And another related chart:"
+                        
                     app.client.files_upload_v2(
                         channel=upload_channel,
                         file=chart_bytes,
                         filename=chart_filename,
-                        title="📊 Query Chart",
-                        initial_comment="Here is the chart for your query:"
+                        title=f"📊 Query Chart {idx + 1}",
+                        initial_comment=comment
                     )
                     print(f"[slack] Chart uploaded to channel {upload_channel}")
                 except Exception as upload_err:
