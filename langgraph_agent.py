@@ -407,6 +407,10 @@ Rules:
         print(f"[generate_chart_node] Skipping chart: Invalid labels or values. labels len: {len(labels)}, values len: {len(values)}")
         return {"chart_paths": [], "csv_content": csv_text}
 
+    # Limit to top 10 values
+    labels = labels[:10]
+    values = values[:10]
+
     try:
         values = [float(v) for v in values]
     except (ValueError, TypeError) as e:
