@@ -27,7 +27,7 @@ class AgentState(TypedDict, total=False):
     final_answer: str
     intent: str
     history: Annotated[list[dict], operator.add]
-    chart_paths: list[str]
+    chart_path: Optional[str]
     followup_questions: list[str]
     csv_content: Optional[str]
 
@@ -149,10 +149,53 @@ Your new SQL should filter/extend the above result to answer the follow-up quest
     prompt += f"""Schema:
 {schema}
 
-User query: {query}2
+User query: {query}
 Instructions:
-1. You should be able to answer general greetings.
-"""
+1. ##CRITICAL: The descriptions of each columns in the table is given below.
+    ** PART_NUMBER- Unique Part Number
+    ** PART_MONTHLY_FORECAST- Parts demand forecast
+    ** PART_MONTHLY_SALES_DEMAND- Actuals sales of part
+    ** PART_FORECAST_VS_VARIANCE_PERCENTAGE-	Variance between actual sales & demand forecasted for each part
+    ** PART_LEAD_TIME-	total lead time from manufacturing to warehouse
+    ** PART_BO_QUANTITY-	Backorders quantity required for this part
+    ** PART_WEEK_OVER_WEEKCHANGE_BO_PERCENTAGE-	Week over week change in the required backorders in percentage terms
+    ** PART_AVERAGE_BO_AGE-	Average Backorder age
+    ** PART_OLDEST_BO_DATE-	oldest backorder date for this part
+    ** PART_INTERNATIONAL_IN_TRANSIT_QUANTITY-	In-transit quantity of this part which is in international transit mode
+    ** PART_DOMESTIC_IN_TRANSIT_QUANTITY-	In-transit quantity of this part which is in domestic transit mode
+    ** PART_DWELL_TIME-	from how many days this part is dwelling in the in-transit mode
+    ** PART_DELAY_DAYS-	how many days this part is delayed from actual delivery date
+    ** PART_SPAC_QUANTITY-	special urgent Backorders category called as SPAC, SPAC quantity required for this part
+    ** PART_WEEK_OVER_WEEKCHANGE_SPAC_PERCENTAGE-	special urgent Backorders category called as SPAC, Week over week change in the required SPAC in percentage terms
+    ** PART_AVERAGE_SPAC_AGE-	Average SPAC  age
+    ** PART_OLDEST_SPAC_DATE-	oldest SPAC date for this part
+    ** PART_PCN_ISSUE-	this parts new version part's issue date
+    ** PART_PCN_MAIL-	this parts new version part's mail date
+    ** PART_AUTO_COMMIT_STATUS-	this parts new version part's auto commit  status
+
+    ** PART_SUPERSESSION_CHAIN-	this parts older and current version, entire supersession chain
+    ** PART_PAST_DUE_ORDERS_QUANTITY-	Parts Past due orders qnty which is past the due date of delivery/shipment from supplier
+    ** PART_AVERAGE_PAST_DUE_AGING-	past due date average aging
+    ** PART_OLDEST_PAST_DUE_DATE-	oldest past due date
+    ** PART_CURRENT_DUE_ORDERS-	which is due for delivery/shipment from supplier for this week
+    ** PART_SPAC_COVERAGE_QUANTITY-	the quantity which can be used to fulfil the required SPAC
+
+    ** PART_SPAC_COVERAGE_PERCENTAGE-	the quantity which can be used to fulfil the required SPAC in terms of percentage
+
+    ** PART_BO_COVERAGE_QUANTITY-	the quantity which can be used to fulfil the required BO
+
+    ** PART_BO_COVERAGE_PERCENTAGE-	the quantity which can be used to fulfil the required BO in terms of percentage
+
+    ** PART_OPEN_ASN_QUANTITY-	The ASN open for this part
+    ** PART_OLDEST_ASN_DATE-	oldest ASN date for this part
+    ** PART_WRITE_OFF_QUANTITY-	quantity which has written-off
+    ** PART_PLUS_UP_QUANTITY-	quantity which has plus-ups
+    ** PART_DECK_NUMBER-	code of part owner who is responsible for this parts management
+    ** PART_CPC_LEVEL-	category/type of this part
+    ** PART_SUPPLIER_NAME_ID-	supplier of this part
+    ** PART_TOP_50-	is this part a member of top SPAC tracker report
+ 2. Use them to understand the data and write an accurate SQL query.
+ """
 
     if error:
         prompt += f"\nWarning: The previous generated SQL gave the following error:\n{error}\nPrevious SQL:\n{sql_query_prev}\n\nPlease fix the SQL query.\n"
@@ -302,7 +345,7 @@ def _extract_csv_from_answer(final_answer: str):
 
 
 def generate_chart_node(state: AgentState):
-    """Detect CSV block in the final answer and generate chart PNGs."""
+    """Detect CSV block in the final answer and generate a chart PNG."""
     import csv as csv_module
     import io
 
@@ -310,13 +353,13 @@ def generate_chart_node(state: AgentState):
 
     csv_text = _extract_csv_from_answer(final_answer)
     if not csv_text:
-        return {"chart_paths": [], "csv_content": None}
+        return {"chart_path": None, "csv_content": None}
 
     # Parse CSV to get rows
     reader = csv_module.reader(io.StringIO(csv_text))
     rows = list(reader)
     if len(rows) < 3:  # need at least header + 2 data rows to bother charting
-        return {"chart_paths": [], "csv_content": csv_text}
+        return {"chart_path": None, "csv_content": csv_text}
 
     prompt = f"""You are a data visualization assistant.
 
@@ -325,15 +368,14 @@ Below is CSV data extracted from a query result:
 {csv_text}
 
 Your task:
-1. Decide the BEST chart types to visualise this data. If there are multiple numeric columns or dimensions that make sense, you can generate up to 2 charts.
-2. For each chart, extract the labels (first column values, excluding the header row) and numeric values (last numeric column, excluding the header row).
+1. Decide the BEST chart type to visualise this data: choose one of ["bar", "line", "pie"].
+2. Extract the labels (first column values, excluding the header row) and numeric values (last numeric column, excluding the header row).
 3. Produce a short, descriptive chart title.
 
-Return ONLY a valid JSON list of objects with no extra text, in exactly this format:
-Example: [{{"chart_type": "bar", "title": "...", "x_label": "...", "y_label": "...", "labels": [...], "values": [...]}}]
+Return ONLY a valid JSON object with no extra text, in exactly this format:
+Example: {{"chart_type": "...", "title": "...", "x_label": "...", "y_label": "...", "labels": [...], "values": [...]}}
 
 Rules:
-- "chart_type" must be one of ["bar", "line", "pie"]
 - "values" must be a list of numbers (floats or ints).
 - Do NOT include markdown or code fences.
 """
@@ -347,99 +389,65 @@ Rules:
         raw = re.sub(r"^```[a-z]*\n?", "", raw)
         raw = re.sub(r"```$", "", raw).strip()
 
-        chart_data_list = json.loads(raw)
-        if isinstance(chart_data_list, dict):
-            chart_data_list = [chart_data_list]
+        chart_data = json.loads(raw)
     except Exception as chart_llm_err:
-        print(f"[generate_chart_node] Chart LLM call failed ({chart_llm_err}); skipping charts but CSV will still be uploaded.")
-        return {"chart_paths": [], "csv_content": csv_text}
+        print(f"[generate_chart_node] Chart LLM call failed ({chart_llm_err}); skipping chart but CSV will still be uploaded.")
+        return {"chart_path": None, "csv_content": csv_text}
+
+    chart_type = chart_data.get("chart_type")
+    labels = chart_data.get("labels", [])
+    values = chart_data.get("values", [])
+    title = chart_data.get("title", "Chart")
+    x_label = chart_data.get("x_label", "")
+    y_label = chart_data.get("y_label", "")
+
+    if not labels or not values or len(labels) != len(values):
+        return {"chart_path": None, "csv_content": csv_text}
+
+    try:
+        values = [float(v) for v in values]
+    except (ValueError, TypeError):
+        return {"chart_path": None, "csv_content": csv_text}
 
     charts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
     os.makedirs(charts_dir, exist_ok=True)
 
-    # Validate and prepare each chart's data
-    valid_charts = []
-    for idx, chart_data in enumerate(chart_data_list):
-        chart_type = chart_data.get("chart_type", "bar")
-        labels = chart_data.get("labels", [])
-        values = chart_data.get("values", [])
-        title = chart_data.get("title", f"Chart {idx+1}")
-        x_label = chart_data.get("x_label", "")
-        y_label = chart_data.get("y_label", "")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    chart_filename = f"chart_{timestamp}.png"
+    chart_path = os.path.join(charts_dir, chart_filename)
 
-        if not labels or not values or len(labels) != len(values):
-            continue
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-        MAX_CHART_ITEMS = 10
-        if len(labels) > MAX_CHART_ITEMS:
-            labels = labels[:MAX_CHART_ITEMS]
-            values = values[:MAX_CHART_ITEMS]
-            title = f"{title} (Top {MAX_CHART_ITEMS})"
+    if chart_type == "pie":
+        ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=140)
+        ax.set_title(title, fontsize=14, fontweight="bold")
+    elif chart_type == "line":
+        ax.plot(labels, values, marker="o", linewidth=2, color="steelblue")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.tick_params(axis="x", rotation=45)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+    else:  # default: bar
+        bars = ax.bar(labels, values, color="steelblue", edgecolor="white")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.tick_params(axis="x", rotation=45)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+        for bar, val in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"{val:,.0f}",
+                ha="center", va="bottom", fontsize=9
+            )
 
-        try:
-            values = [float(v) for v in values]
-        except (ValueError, TypeError):
-            continue
+    plt.tight_layout()
+    plt.savefig(chart_path, dpi=150)
+    plt.close(fig)
 
-        valid_charts.append({
-            "chart_type": chart_type,
-            "labels": labels,
-            "values": values,
-            "title": title,
-            "x_label": x_label,
-            "y_label": y_label,
-        })
-
-    if not valid_charts:
-        return {"final_answer": str(final_answer), "chart_paths": [], "csv_content": csv_text}
-
-    chart_paths = []
-
-    for idx, cd in enumerate(valid_charts):
-        chart_type = cd["chart_type"]
-        labels = cd["labels"]
-        values = cd["values"]
-        title = cd["title"]
-        x_label = cd["x_label"]
-        y_label = cd["y_label"]
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        if chart_type == "pie":
-            ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=140)
-            ax.set_title(title, fontsize=14, fontweight="bold")
-        elif chart_type == "line":
-            ax.plot(labels, values, marker="o", linewidth=2, color="steelblue")
-            ax.set_xlabel(x_label)
-            ax.set_ylabel(y_label)
-            ax.set_title(title, fontsize=14, fontweight="bold")
-            ax.tick_params(axis="x", rotation=45)
-            ax.grid(axis="y", linestyle="--", alpha=0.7)
-        else:  # bar
-            bars = ax.bar(labels, values, color="steelblue", edgecolor="white")
-            ax.set_xlabel(x_label)
-            ax.set_ylabel(y_label)
-            ax.set_title(title, fontsize=14, fontweight="bold")
-            ax.tick_params(axis="x", rotation=45)
-            ax.grid(axis="y", linestyle="--", alpha=0.7)
-            for bar, val in zip(bars, values):
-                label_text = f"{val:,.0f}" if float(val).is_integer() else f"{val:,.2f}"
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_height(),
-                    label_text,
-                    ha="center", va="bottom", fontsize=9
-                )
-
-        plt.tight_layout()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        chart_filename = f"chart_{timestamp}_{idx}.png"
-        chart_path = os.path.join(charts_dir, chart_filename)
-        plt.savefig(chart_path, dpi=150)
-        plt.close(fig)
-        chart_paths.append(chart_path)
-
-    return {"final_answer": str(final_answer), "chart_paths": chart_paths, "csv_content": csv_text}
+    return {"final_answer": str(final_answer), "chart_path": chart_path, "csv_content": csv_text}
 
 def generate_followup_node(state: AgentState):
     query = state.get("query", "")
@@ -564,13 +572,12 @@ def main():
                         print(f"[{node_name}] Generated final answer.")
                         final_result = node_output.get("final_answer")
                     elif node_name == "generate_chart_node":
-                        chart_paths = node_output.get("chart_paths", [])
+                        chart_path = node_output.get("chart_path")
                         final_result = node_output.get("final_answer", final_result)
-                        if chart_paths:
-                            for cp in chart_paths:
-                                print(f"[{node_name}] Chart created: {cp}")
+                        if chart_path:
+                            print(f"[{node_name}] Chart created: {chart_path}")
                         else:
-                            print(f"[{node_name}] No charts generated.")
+                            print(f"[{node_name}] No chart generated (no table detected).")
                     elif node_name == "generate_followup_node":
                         final_followups = node_output.get("followup_questions", [])
                         if final_followups:
