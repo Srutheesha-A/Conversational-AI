@@ -195,6 +195,9 @@ Instructions:
     ** PART_SUPPLIER_NAME_ID-	supplier of this part
     ** PART_TOP_50-	is this part a member of top SPAC tracker report
  2. Use them to understand the data and write an accurate SQL query.
+ 3. ##IMPORTANT: You MUST include PART_NUMBER in all queries to ensure results are aggregated at the part level, unless the question explicitly asks for a different level of aggregation.
+ 4. If the question is asking for a specific metric (e.g. "Which parts have the highest backorder quantity?"), you MUST include that metric in the SELECT clause and order by it to ensure the results are relevant to the question.
+  
  """
 
     if error:
