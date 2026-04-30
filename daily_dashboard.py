@@ -115,6 +115,8 @@ def _fetch_pact_kpis() -> Optional[dict]:
         total_time = total_lead + total_delay
         lead_time_pct = (total_lead / total_time * 100) if total_time > 0 else 0
         delay_time_pct = (total_delay / total_time * 100) if total_time > 0 else 0
+        cur.execute("SELECT SUM(CAST(PART_CURRENT_DUE_ORDERS AS REAL)) FROM supply_chain_data")
+        total_current_due = cur.fetchone()[0] or 0
         cur.execute("SELECT COUNT(DISTINCT PART_SUPPLIER_NAME_ID) FROM supply_chain_data")
         total_suppliers = cur.fetchone()[0]
         return {
@@ -124,6 +126,7 @@ def _fetch_pact_kpis() -> Optional[dict]:
             "total_past_due": total_past_due,
             "lead_time_pct": lead_time_pct,
             "delay_time_pct": delay_time_pct,
+            "total_current_due": total_current_due,
             "total_suppliers": total_suppliers,
         }
     except Exception:
@@ -234,6 +237,7 @@ def build_dashboard_blocks() -> list[dict]:
                 {"type": "mrkdwn", "text": f"📉 *Backorders (BO)*\n{pact['total_bo']:,.0f}"},
                 {"type": "mrkdwn", "text": f"📦 *SPAC Quantity*\n{pact['total_spac']:,.0f}"},
                 {"type": "mrkdwn", "text": f"⚠️ *Past Due Orders*\n{pact['total_past_due']:,.0f}"},
+                {"type": "mrkdwn", "text": f"📝 *Current Due Orders*\n{pact['total_current_due']:,.0f}"},
                 {"type": "mrkdwn", "text": f"⏳ *Lead Time %*\n{pact['lead_time_pct']:.1f}%"},
                 {"type": "mrkdwn", "text": f"⏱️ *Delay Time %*\n{pact['delay_time_pct']:.1f}%"},
                 {"type": "mrkdwn", "text": f"🏢 *Total Suppliers*\n{pact['total_suppliers']:,}"},
