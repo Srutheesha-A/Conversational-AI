@@ -27,7 +27,7 @@ class AgentState(TypedDict, total=False):
     final_answer: str
     intent: str
     history: Annotated[list[dict], operator.add]
-    chart_path: Optional[str]
+    chart_paths: Optional[list[str]]
     followup_questions: list[str]
     csv_content: Optional[str]
 
@@ -353,13 +353,15 @@ def generate_chart_node(state: AgentState):
 
     csv_text = _extract_csv_from_answer(final_answer)
     if not csv_text:
-        return {"chart_path": None, "csv_content": None}
+        print("[generate_chart_node] Skiping chart: No CSV text extracted.")
+        return {"chart_paths": [], "csv_content": None}
 
     # Parse CSV to get rows
     reader = csv_module.reader(io.StringIO(csv_text))
     rows = list(reader)
     if len(rows) < 3:  # need at least header + 2 data rows to bother charting
-        return {"chart_path": None, "csv_content": csv_text}
+        print(f"[generate_chart_node] Skipping chart: Not enough CSV rows (found {len(rows)}).")
+        return {"chart_paths": [], "csv_content": csv_text}
 
     prompt = f"""You are a data visualization assistant.
 
@@ -392,7 +394,7 @@ Rules:
         chart_data = json.loads(raw)
     except Exception as chart_llm_err:
         print(f"[generate_chart_node] Chart LLM call failed ({chart_llm_err}); skipping chart but CSV will still be uploaded.")
-        return {"chart_path": None, "csv_content": csv_text}
+        return {"chart_paths": [], "csv_content": csv_text}
 
     chart_type = chart_data.get("chart_type")
     labels = chart_data.get("labels", [])
@@ -402,12 +404,14 @@ Rules:
     y_label = chart_data.get("y_label", "")
 
     if not labels or not values or len(labels) != len(values):
-        return {"chart_path": None, "csv_content": csv_text}
+        print(f"[generate_chart_node] Skipping chart: Invalid labels or values. labels len: {len(labels)}, values len: {len(values)}")
+        return {"chart_paths": [], "csv_content": csv_text}
 
     try:
         values = [float(v) for v in values]
-    except (ValueError, TypeError):
-        return {"chart_path": None, "csv_content": csv_text}
+    except (ValueError, TypeError) as e:
+        print(f"[generate_chart_node] Skipping chart: Error converting values to float. {e}")
+        return {"chart_paths": [], "csv_content": csv_text}
 
     charts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
     os.makedirs(charts_dir, exist_ok=True)
@@ -447,7 +451,7 @@ Rules:
     plt.savefig(chart_path, dpi=150)
     plt.close(fig)
 
-    return {"final_answer": str(final_answer), "chart_path": chart_path, "csv_content": csv_text}
+    return {"final_answer": str(final_answer), "chart_paths": [chart_path], "csv_content": csv_text}
 
 def generate_followup_node(state: AgentState):
     query = state.get("query", "")
@@ -572,12 +576,13 @@ def main():
                         print(f"[{node_name}] Generated final answer.")
                         final_result = node_output.get("final_answer")
                     elif node_name == "generate_chart_node":
-                        chart_path = node_output.get("chart_path")
+                        chart_paths = node_output.get("chart_paths", [])
                         final_result = node_output.get("final_answer", final_result)
-                        if chart_path:
-                            print(f"[{node_name}] Chart created: {chart_path}")
+                        if chart_paths:
+                            for cp in chart_paths:
+                                print(f"[{node_name}] Chart created: {cp}")
                         else:
-                            print(f"[{node_name}] No chart generated (no table detected).")
+                            print(f"[{node_name}] No chart generated (no table detected or charting skipped).")
                     elif node_name == "generate_followup_node":
                         final_followups = node_output.get("followup_questions", [])
                         if final_followups:
