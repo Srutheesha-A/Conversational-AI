@@ -27,7 +27,7 @@ class AgentState(TypedDict, total=False):
     final_answer: str
     intent: str
     history: Annotated[list[dict], operator.add]
-    chart_path: Optional[str]
+    chart_paths: Optional[list[str]]
     followup_questions: list[str]
     csv_content: Optional[str]
 
@@ -150,19 +150,57 @@ Your new SQL should filter/extend the above result to answer the follow-up quest
 {schema}
 
 User query: {query}
-Instructions to follow while generating SQL based on the above schema:
-1. Data is structured across 4 Regions, 8 Zones, 16 Districts, and 32–40 Dealers, with each district having 2–3 dealers.
-2. The dataset contains daily-level data for the complete month of March 2026 only.
-3. Previous Year (PY) metrics represent March 2025 performance and are provided as PY Revenue, PY RO, and PY $/RO.
-4. Dealer-level monthly targets for Revenue, RO, and $/RO are set at 5% higher than Previous Year values and distributed evenly across days.
-5. ##CRITICAL: Revenue is always calculated as RO × $/RO, ensuring mathematical consistency for Actual, Target, and PY metrics.
-6. Dealer performance distribution is as follows: 55% dealers meet Revenue targets (Whose Revenue Achieved % >=100%) , 40% dealers meet RO targets  (Whose RO Achieved % >=100%), and 40% dealers meet $/RO targets  (Whose $/RO Achieved % >=100%)
-7. All KPIs include Gap and Achieved % to support target tracking, benchmarking, and Conversational BI analysis.
-8. Use the above details to inform your SQL generation, ensuring that your queries can support analysis at the Region, Zone, District, and Dealer levels, and can calculate metrics like Revenue, RO, $/RO, and their respective targets and achievement percentages.
-9. ##IMPORTANT: You MUST include "Region", "Zone", "District", and "Dealer_Code" in all queries to ensure results are aggregated at the appropriate level, unless the question explicitly asks for a different level of aggregation.
-10. ##IMPORTANT: If the question contains two parts seperated by "and", "also", or a comma, you MUST provide a single SQL query that can answer both parts together, rather than generating separate queries for each part. This is critical to ensure the agent can provide a unified answer and generate accurate charts.
+Instructions:
+1. ##CRITICAL: The descriptions of each columns in the table is given below.
+    ** PART_NUMBER- Unique Part Number
+    ** PART_MONTHLY_FORECAST- Parts demand forecast
+    ** PART_MONTHLY_SALES_DEMAND- Actuals sales of part
+    ** PART_FORECAST_VS_VARIANCE_PERCENTAGE-	Variance between actual sales & demand forecasted for each part
+    ** PART_LEAD_TIME-	total lead time from manufacturing to warehouse
+    ** PART_BO_QUANTITY-	Backorders quantity required for this part
+    ** PART_WEEK_OVER_WEEKCHANGE_BO_PERCENTAGE-	Week over week change in the required backorders in percentage terms
+    ** PART_AVERAGE_BO_AGE-	Average Backorder age
+    ** PART_OLDEST_BO_DATE-	oldest backorder date for this part
+    ** PART_INTERNATIONAL_IN_TRANSIT_QUANTITY-	In-transit quantity of this part which is in international transit mode
+    ** PART_DOMESTIC_IN_TRANSIT_QUANTITY-	In-transit quantity of this part which is in domestic transit mode
+    ** PART_DWELL_TIME-	from how many days this part is dwelling in the in-transit mode
+    ** PART_DELAY_DAYS-	how many days this part is delayed from actual delivery date
+    ** PART_SPAC_QUANTITY-	special urgent Backorders category called as SPAC, SPAC quantity required for this part
+    ** PART_WEEK_OVER_WEEKCHANGE_SPAC_PERCENTAGE-	special urgent Backorders category called as SPAC, Week over week change in the required SPAC in percentage terms
+    ** PART_AVERAGE_SPAC_AGE-	Average SPAC  age
+    ** PART_OLDEST_SPAC_DATE-	oldest SPAC date for this part
+    ** PART_PCN_ISSUE-	this parts new version part's issue date
+    ** PART_PCN_MAIL-	this parts new version part's mail date
+    ** PART_AUTO_COMMIT_STATUS-	this parts new version part's auto commit  status
 
-"""
+    ** PART_SUPERSESSION_CHAIN-	this parts older and current version, entire supersession chain
+    ** PART_PAST_DUE_ORDERS_QUANTITY-	Parts Past due orders qnty which is past the due date of delivery/shipment from supplier
+    ** PART_AVERAGE_PAST_DUE_AGING-	past due date average aging
+    ** PART_OLDEST_PAST_DUE_DATE-	oldest past due date
+    ** PART_CURRENT_DUE_ORDERS-	which is due for delivery/shipment from supplier for this week
+    ** PART_SPAC_COVERAGE_QUANTITY-	the quantity which can be used to fulfil the required SPAC
+
+    ** PART_SPAC_COVERAGE_PERCENTAGE-	the quantity which can be used to fulfil the required SPAC in terms of percentage
+
+    ** PART_BO_COVERAGE_QUANTITY-	the quantity which can be used to fulfil the required BO
+
+    ** PART_BO_COVERAGE_PERCENTAGE-	the quantity which can be used to fulfil the required BO in terms of percentage
+
+    ** PART_OPEN_ASN_QUANTITY-	The ASN open for this part
+    ** PART_OLDEST_ASN_DATE-	oldest ASN date for this part
+    ** PART_WRITE_OFF_QUANTITY-	quantity which has written-off
+    ** PART_PLUS_UP_QUANTITY-	quantity which has plus-ups
+    ** PART_DECK_NUMBER-	code of part owner who is responsible for this parts management
+    ** PART_CPC_LEVEL-	category/type of this part
+    ** PART_SUPPLIER_NAME_ID-	supplier of this part
+    ** PART_TOP_50-	is this part a member of top SPAC tracker report
+ 2. Use them to understand the data and write an accurate SQL query.
+ 3. ##IMPORTANT: You MUST include PART_NUMBER in all queries to ensure results are aggregated at the part level, unless the question explicitly asks for a different level of aggregation.
+ 4. ##CRITICAL: If the question is asking for a comparison or ranking (e.g. "Which parts have the highest backorder quantity?"), you MUST include that metric in the SELECT clause and order by it to ensure the results are relevant to the question.
+     For example, if the question is "Which parts have the highest backorder quantity?", your SQL MUST include "PART_NUMBER","PART_BO_QUANTITY" in the SELECT clause and an "ORDER BY PART_BO_QUANTITY DESC" to ensure the results are relevant to the question.
+ 4. If the question is asking for a specific metric (e.g. "Which parts have the highest backorder quantity?"), you MUST include that metric in the SELECT clause and order by it to ensure the results are relevant to the question.
+  
+ """
 
     if error:
         prompt += f"\nWarning: The previous generated SQL gave the following error:\n{error}\nPrevious SQL:\n{sql_query_prev}\n\nPlease fix the SQL query.\n"
@@ -338,7 +376,7 @@ Below is CSV data extracted from a query result:
 
 Your task:
 1. Examine the columns. Identify the main label column (usually the first column) and any numeric columns.
-2. For EACH numeric column define a chart.
+2. For EACH numeric column that makes sense to visualize, define a chart.
 3. Choose the BEST chart type ("bar", "line", or "pie") for each.
 4. Extract the labels and the specific numeric values for that chart.
 
@@ -403,6 +441,7 @@ Example:
 
         chart_filename = f"chart_{timestamp}_{i}.png"
         chart_path = os.path.join(charts_dir, chart_filename)
+
         fig, ax = plt.subplots(figsize=(10, 6))
 
         if chart_type == "pie":
